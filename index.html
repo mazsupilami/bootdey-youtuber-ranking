@@ -9,6 +9,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.0/dist/js/bootstrap.bundle.min.js"></script>
     <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" />
+    <!-- Supabase JS Client v2 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -21,8 +23,13 @@
                             <h2 id="ranking-table-title">SUBSCRIBED YOUTUBE CHANNELS RANKING</h2>
                         </div>
                         <p id="channel-summary-text">
-                            Phân trang, mỗi trang 50 kênh &bull; Hiển thị <strong id="total-count">21</strong> kênh từ dữ liệu SQL
+                            Phân trang, mỗi trang 50 kênh &bull; Hiển thị <strong id="total-count">21</strong> kênh
                         </p>
+                        <div class="mb-3" id="supabase-status-container">
+                            <span class="badge badge-pill badge-secondary px-3 py-2" id="supabase-status-badge">
+                                <i class="fa fa-circle-o-notch fa-spin"></i> Đang kết nối Supabase...
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -97,7 +104,9 @@
                     </div>
 
                     <div class="primary-btn text-center">
-                        <a href="data-channels.sql" download class="btn btn-primary"><i class="fa fa-download"></i> Download SQL Data</a>
+                        <a href="data-channels.sql" download class="btn btn-primary mr-2 mb-2"><i class="fa fa-download"></i> Download SQL Data</a>
+                        <button type="button" class="btn btn-success mr-2 mb-2" id="btn-sync-data" onclick="syncLocalToSupabase()"><i class="fa fa-cloud-upload"></i> Đồng bộ Data lên Supabase</button>
+                        <button type="button" class="btn btn-outline-info mb-2" id="btn-refresh-data" onclick="window.reloadChannels()"><i class="fa fa-refresh"></i> Tải lại từ Supabase</button>
                     </div>
                 </div>
             </div>
@@ -443,9 +452,13 @@
     </style>
 
     <script src="channels-data.js"></script>
+    <script src="supabase-config.js"></script>
     <script type="text/javascript">
         (function () {
             const DEFAULT_AVATAR = 'img/channel/500x500/default-channel-thumbnail.jpg';
+
+            // Dữ liệu kênh hiện thời (ưu tiên lấy từ Supabase, fallback CHANNELS_DATA)
+            let currentChannels = (window.CHANNELS_DATA || []).slice();
 
             // Ảnh đại diện cho từng nhóm danh mục
             const CATEGORY_META = {
@@ -467,8 +480,8 @@
             }
 
             function renderGroupCategories(activeCategory) {
-                const counts = { 'ALL': CHANNELS_DATA.length };
-                CHANNELS_DATA.forEach(function (ch) {
+                const counts = { 'ALL': currentChannels.length };
+                currentChannels.forEach(function (ch) {
                     counts[ch.category] = (counts[ch.category] || 0) + 1;
                 });
 
@@ -527,7 +540,7 @@
                 const sortSub = document.getElementById('sort-subscribe').value;
                 const sortDate = document.getElementById('sort-date').value;
 
-                let filtered = CHANNELS_DATA.filter(function (ch) {
+                let filtered = currentChannels.filter(function (ch) {
                     const matchCat = (category === 'ALL') || (ch.category.toLowerCase() === category.toLowerCase());
                     const matchKw = !keyword ||
                         ch.name.toLowerCase().indexOf(keyword) !== -1 ||
@@ -583,6 +596,7 @@
                                 '<div class="event-date">' +
                                     '<span class="' + rankClass + '">#' + rank + '</span>' +
                                     '<p>' + formatPublishedDate(ch.published_at) + '</p>' +
+                                mortalDateHelp(ch.published_at) +
                                 '</div>' +
                             '</th>' +
                             '<td>' +
@@ -613,7 +627,7 @@
                             '</td>' +
                             '<td>' +
                                 '<div class="r-no">' +
-                                    '<span>' + ch.subscribers_formatted + '</span>' +
+                                    '<span>' + (ch.subscribers_formatted || formatSubCount(ch.subscribers)) + '</span>' +
                                     '<small class="text-muted d-block">' + (ch.subscribers || 0).toLocaleString() + ' người đăng ký</small>' +
                                 '</div>' +
                             '</td>' +
@@ -626,6 +640,15 @@
                         '</tr>'
                     );
                 }).join('');
+
+                function mortalDateHelp(d) { return ''; }
+
+                function formatSubCount(num) {
+                    if (!num) return '0';
+                    if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+                    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+                    return num.toString();
+                }
 
                 // Gắn sự kiện khi bấm vào tên danh mục trong từng dòng
                 tbody.querySelectorAll('.js-category-link').forEach(function (link) {
@@ -663,9 +686,43 @@
                 applyFiltersAndRender();
             });
 
-            // Khởi tạo giao diện
-            renderGroupCategories('ALL');
-            applyFiltersAndRender();
+            // Hàm khởi tạo và tải dữ liệu từ Supabase
+            async function initApp() {
+                const badge = document.getElementById('supabase-status-badge');
+                if (badge) {
+                    badge.className = 'badge badge-pill badge-warning px-3 py-2';
+                    badge.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Đang tải dữ liệu từ Supabase...';
+                }
+
+                if (typeof window.getChannelsData === 'function') {
+                    const res = await window.getChannelsData();
+                    if (res && res.data && res.data.length > 0) {
+                        currentChannels = res.data;
+                    }
+                    if (badge) {
+                        if (res.source === 'supabase') {
+                            badge.className = 'badge badge-pill badge-success px-3 py-2';
+                            badge.innerHTML = '<i class="fa fa-check-circle"></i> Đã kết nối Supabase (' + currentChannels.length + ' kênh)';
+                        } else if (res.source === 'empty_supabase') {
+                            badge.className = 'badge badge-pill badge-warning px-3 py-2';
+                            badge.title = res.message;
+                            badge.innerHTML = '<i class="fa fa-exclamation-triangle"></i> Supabase trống/RLS (Đang dùng dữ liệu dự phòng)';
+                        } else {
+                            badge.className = 'badge badge-pill badge-info px-3 py-2';
+                            badge.title = res.message || '';
+                            badge.innerHTML = '<i class="fa fa-database"></i> Dữ liệu cục bộ: ' + (res.data ? res.data.length : 0) + ' kênh';
+                        }
+                    }
+                }
+
+                renderGroupCategories('ALL');
+                applyFiltersAndRender();
+            }
+
+            window.reloadChannels = initApp;
+
+            // Chạy khởi tạo
+            initApp();
         })();
     </script>
 </body>

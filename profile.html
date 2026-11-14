@@ -9,6 +9,8 @@
     <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" />
     <script src="https://code.jquery.com/jquery-1.10.2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Supabase JS Client v2 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -17,7 +19,7 @@
             <div class="main-body">
                 <!-- Thanh điều hướng & chọn nhanh kênh -->
                 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 bg-white p-3 rounded shadow-sm">
-                    <a href="Event_Schedule_list_edited.html" class="btn btn-outline-primary btn-sm">
+                    <a href="index.html" class="btn btn-outline-primary btn-sm">
                         <i class="fa fa-arrow-left"></i> Quay lại Bảng xếp hạng
                     </a>
                     <div class="d-flex align-items-center mt-2 mt-sm-0">
@@ -53,7 +55,7 @@
                                         <a id="channel-youtube-btn" href="https://youtube.com/@MrBeast" target="_blank" rel="noopener noreferrer" class="btn btn-danger">
                                             <i class="fa fa-youtube-play"></i> YouTube Channel
                                         </a>
-                                        <a href="Event_Schedule_list_edited.html" class="btn btn-outline-primary">
+                                        <a href="index.html" class="btn btn-outline-primary">
                                             Danh sách
                                         </a>
                                     </div>
@@ -220,26 +222,36 @@
         </style>
 
         <script src="channels-data.js"></script>
+        <script src="supabase-config.js"></script>
         <script type="text/javascript">
-            (function () {
+            (async function () {
                 const DEFAULT_AVATAR = 'img/channel/500x500/default-channel-thumbnail.jpg';
                 const DEFAULT_BANNER = 'img/channel/banner/default-channel-banner.jpg';
 
+                let channelsList = (window.CHANNELS_DATA || []).slice();
+                if (typeof window.getChannelsData === 'function') {
+                    const res = await window.getChannelsData();
+                    if (res && res.data && res.data.length > 0) {
+                        channelsList = res.data;
+                    }
+                }
+
                 // Sắp xếp để tính thứ hạng theo số lượng subscribers giảm dần
-                const sortedBySub = CHANNELS_DATA.slice().sort(function (a, b) {
+                const sortedBySub = channelsList.slice().sort(function (a, b) {
                     return b.subscribers - a.subscribers;
                 });
                 const maxSub = sortedBySub.length > 0 ? sortedBySub[0].subscribers : 1;
 
                 function getChannelById(id) {
-                    return CHANNELS_DATA.find(function (c) { return c.id === id; }) || sortedBySub[0];
+                    return channelsList.find(function (c) { return c.id === id; }) || sortedBySub[0];
                 }
 
                 function populateSelect(currentId) {
                     const select = document.getElementById('quick-channel-select');
                     select.innerHTML = sortedBySub.map(function (c, i) {
                         const selected = c.id === currentId ? 'selected' : '';
-                        return '<option value="' + c.id + '" ' + selected + '>#' + (i + 1) + ' - ' + c.name + ' (' + c.subscribers_formatted + ')</option>';
+                        const formattedSub = c.subscribers_formatted || (c.subscribers ? (c.subscribers / 1000000).toFixed(1) + 'M' : '0');
+                        return '<option value="' + c.id + '" ' + selected + '>#' + (i + 1) + ' - ' + c.name + ' (' + formattedSub + ')</option>';
                     }).join('');
 
                     select.onchange = function () {
@@ -264,10 +276,12 @@
 
                 function renderProfile(channelId) {
                     const ch = getChannelById(channelId);
+                    if (!ch) return;
                     const rank = sortedBySub.findIndex(function (item) { return item.id === ch.id; }) + 1;
+                    const formattedSub = ch.subscribers_formatted || (ch.subscribers ? (ch.subscribers / 1000000).toFixed(1) + 'M' : '0');
 
-                    document.getElementById('page-title').textContent = ch.name + ' (' + ch.handle + ') - YouTuber Profile';
-                    document.getElementById('channel-rank-badge').textContent = 'Rank #' + rank + ' • ' + ch.subscribers_formatted + ' Subs';
+                    document.getElementById('page-title').textContent = ch.name + ' (' + (ch.handle || '') + ') - YouTuber Profile';
+                    document.getElementById('channel-rank-badge').textContent = 'Rank #' + rank + ' • ' + formattedSub + ' Subs';
                     document.getElementById('channel-banner').src = 'img/channel/banner/' + (ch.banner || 'default-channel-banner.jpg');
                     document.getElementById('channel-avatar').src = 'img/channel/500x500/' + (ch.avatar || 'default-channel-thumbnail.jpg');
 
@@ -281,9 +295,9 @@
                     document.getElementById('input-name').value = ch.name;
                     document.getElementById('input-handle').value = ch.handle || 'NULL';
                     document.getElementById('input-category').value = ch.category;
-                    document.getElementById('input-subscribers').value = ch.subscribers_formatted + ' (' + (ch.subscribers || 0).toLocaleString() + ' người đăng ký)';
+                    document.getElementById('input-subscribers').value = formattedSub + ' (' + (ch.subscribers || 0).toLocaleString() + ' người đăng ký)';
                     document.getElementById('input-videos').value = (ch.videos_count || 0).toLocaleString() + ' videos';
-                    document.getElementById('input-description').value = ch.description || 'Chưa có mô tả chi tiết trong SQL.';
+                    document.getElementById('input-description').value = ch.description || 'Chưa có mô tả chi tiết trong Supabase.';
 
                     // Mạng xã hội
                     document.getElementById('social-links-list').innerHTML = [
@@ -296,7 +310,7 @@
 
                     // Thanh progress so sánh
                     const subRatio = Math.max(2, Math.round((ch.subscribers / maxSub) * 100));
-                    document.getElementById('sub-ratio-label').textContent = ch.subscribers_formatted + ' / 375M (' + subRatio + '%)';
+                    document.getElementById('sub-ratio-label').textContent = formattedSub + ' / ' + (sortedBySub[0].subscribers_formatted || '375M') + ' (' + subRatio + '%)';
                     document.getElementById('sub-progress-bar').style.width = subRatio + '%';
 
                     const videoPercent = Math.min(100, Math.max(5, Math.round(Math.log10((ch.videos_count || 1) + 1) / Math.log10(155000) * 100)));
@@ -314,13 +328,14 @@
                     } else {
                         relatedContainer.innerHTML = related.map(function (r) {
                             const rAvatar = 'img/channel/500x500/' + (r.avatar || 'default-channel-thumbnail.jpg');
+                            const rSub = r.subscribers_formatted || (r.subscribers ? (r.subscribers / 1000000).toFixed(1) + 'M' : '0');
                             return (
                                 '<div class="col-md-6 mb-2">' +
                                     '<a href="profile.html?id=' + encodeURIComponent(r.id) + '" class="related-item">' +
                                         '<img src="' + rAvatar + '" alt="' + r.name + '" onerror="this.onerror=null;this.src=\'' + DEFAULT_AVATAR + '\';" />' +
                                         '<div class="text-truncate">' +
                                             '<div class="font-weight-bold text-truncate" style="font-size:14px;">' + r.name + '</div>' +
-                                            '<div class="text-muted small">' + r.subscribers_formatted + ' subs &bull; ' + (r.videos_count || 0).toLocaleString() + ' videos</div>' +
+                                            '<div class="text-muted small">' + rSub + ' subs &bull; ' + (r.videos_count || 0).toLocaleString() + ' videos</div>' +
                                         '</div>' +
                                     '</a>' +
                                 '</div>'
@@ -330,7 +345,7 @@
                 }
 
                 const params = new URLSearchParams(window.location.search);
-                const initialId = params.get('id') || sortedBySub[0].id;
+                const initialId = params.get('id') || (sortedBySub[0] && sortedBySub[0].id);
                 populateSelect(initialId);
                 renderProfile(initialId);
             })();

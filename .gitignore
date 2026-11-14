@@ -1,0 +1,7 @@
+# Không đưa file chứa khóa bí mật lên GitHub
+supabase.txt
+superbase.txt
+youtube.txt
+.env
+.env.*
+supabase/.temp/
